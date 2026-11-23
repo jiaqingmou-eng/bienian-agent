@@ -1,0 +1,41 @@
+name: quality
+on: [push, pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: enterprise
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: enterprise_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U enterprise -d enterprise_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      # Switch to frozen/locked installation once the first resolved lockfiles are committed.
+      - run: pnpm install --no-frozen-lockfile
+      - run: uv sync --directory services/backend
+      - run: pnpm check:scaffold
+      - run: pnpm test:offline
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://enterprise:ci_password@localhost:5432/enterprise_test
+      - run: pnpm build
+      - run: pnpm contracts:generate
+      - run: pnpm typecheck

@@ -1,0 +1,31 @@
+{
+  "name": "enterprise-agent",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "engines": { "node": ">=22.12 <25" },
+  "scripts": {
+    "env:init": "node scripts/init-env.mjs",
+    "check:scaffold": "node scripts/check-scaffold.mjs",
+    "test:offline": "node --experimental-strip-types --test apps/web/tests/money.test.mjs scripts/environment.test.mjs",
+    "dev": "concurrently --kill-others-on-fail -n web,bff,python \"pnpm --filter @enterprise/web dev\" \"pnpm --filter @enterprise/bff dev\" \"uv run --directory services/backend python -m enterprise_agent\"",
+    "dev:web": "pnpm --filter @enterprise/web dev",
+    "dev:bff": "pnpm --filter @enterprise/bff dev",
+    "dev:backend": "uv run --directory services/backend python -m enterprise_agent",
+    "build": "pnpm --filter @enterprise/web build && pnpm --filter @enterprise/bff build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint && uv run --directory services/backend ruff check .",
+    "format": "prettier --write . && uv run --directory services/backend ruff format .",
+    "format:check": "prettier --check . && uv run --directory services/backend ruff format --check .",
+    "test": "pnpm --filter @enterprise/web test && pnpm --filter @enterprise/bff test && uv run --directory services/backend pytest",
+    "db:migrate": "uv run --directory services/backend alembic upgrade head",
+    "db:seed": "uv run --directory services/backend python -m enterprise_agent.db.seed",
+    "db:up": "docker compose --env-file .env -f infra/compose.yaml up -d postgres",
+    "db:down": "docker compose --env-file .env -f infra/compose.yaml down",
+    "contracts:generate": "uv run --directory services/backend python -m enterprise_agent.export_openapi && pnpm --filter @enterprise/bff contracts:generate"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.5.3"
+  },
+  "pnpm": { "onlyBuiltDependencies": ["esbuild", "@nestjs/core"] }
+}
