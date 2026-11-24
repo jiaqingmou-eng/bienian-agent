@@ -1,6 +1,5 @@
 """任务快照、乐观并发与确认门禁；财务副作用只能经受控工具执行。"""
 
-import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -11,6 +10,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from enterprise_agent.agent import executions
 from enterprise_agent.agent.model import Extractor
 from enterprise_agent.agent.prompts import PROMPT_VERSION
 from enterprise_agent.agent.schemas import (
@@ -25,7 +25,7 @@ from enterprise_agent.agent.schemas import (
 )
 from enterprise_agent.agent.workflow import interpret
 from enterprise_agent.config import get_settings
-from enterprise_agent.db.models import AgentRun, User
+from enterprise_agent.db.models import AgentExecution, AgentRun, User
 from enterprise_agent.finance.schemas import CreateExpenseInput
 from enterprise_agent.finance.service import payload_hash
 from enterprise_agent.tools.expenses import TOOL_NAME, TOOL_VERSION, create_expense_draft
@@ -112,7 +112,7 @@ def fresh_actor(db: Session, owner_id: UUID, tenant_id: UUID) -> User:
 def start_run(
     db: Session, actor: User, request: StartRunRequest, extractor: Extractor, request_id: str
 ) -> RunResponse:
-    input_hash = hashlib.sha256(request.message.encode()).hexdigest()
+    input_hash = executions.message_hash(request.message)
     owner_id, tenant_id = actor.id, actor.tenant_id
     lookup = select(AgentRun).where(
         AgentRun.tenant_id == tenant_id,
@@ -144,6 +144,10 @@ def start_run(
         )
         db.add(run)
         try:
+            # flush 取得服务端任务 ID 和默认版本；随后将任务、初始消息和执行记录一起提交。
+            # 任一写入失败都回滚，不能留下没有执行记录的新消息。
+            db.flush()
+            executions.accept(db, run, request.client_request_id, request.message, request_id)
             db.commit()
         except IntegrityError:
             db.rollback()
@@ -152,9 +156,15 @@ def start_run(
                 raise
     if run.input_hash != input_hash:
         raise HTTPException(409, "相同请求标识不能用于不同消息")
-    if run.version != 0:
-        return response(run)
-    return advance(db, fresh_actor(db, owner_id, tenant_id), run, None, extractor, request_id)
+    return continue_message(
+        db,
+        fresh_actor(db, owner_id, tenant_id),
+        run,
+        request.client_request_id,
+        request.message,
+        extractor,
+        request_id,
+    )
 
 
 def send_message(
@@ -170,14 +180,9 @@ def send_message(
         if message["id"] == str(request.message_id):
             if message["role"] != "user" or message["content"] != request.message:
                 raise HTTPException(409, "相同消息标识不能用于不同内容")
-            # 初始模型调用失败的 run 仍可使用原始消息重试。
-            if (
-                run.status == "collecting"
-                and run.messages[-1]["id"] == message["id"]
-                and run.messages[-1]["role"] == "user"
-            ):
-                return advance(db, actor, run, None, extractor, request_id)
-            return response(run)
+            return continue_message(
+                db, actor, run, request.message_id, request.message, extractor, request_id
+            )
     if run.version != request.expected_version:
         raise HTTPException(409, "任务已变化，请刷新后再修改")
     if run.status not in {"collecting", "awaiting_confirmation"}:
@@ -219,24 +224,90 @@ def send_message(
     ).rowcount
     if changed != 1:
         db.rollback()
+        # 相同消息可能由另一请求刚刚接收。先重新走去重分支，不把已接收消息再追加一次；
+        # 不同消息 / 版本的竞争仍按原有 409 规则处理，这里不实现 run 级调度或租约。
+        latest = load_run(db, actor, run_id)
+        if any(message["id"] == str(request.message_id) for message in latest.messages):
+            return send_message(db, actor, run_id, request, extractor, request_id)
         raise HTTPException(409, "任务已变化，请刷新后再修改")
+    # populate_existing 读取本事务刚更新的版本，执行记录必须绑定消息接收后的版本。
+    run = load_run(db, actor, run_id)
+    executions.accept(db, run, request.message_id, request.message, request_id)
     db.commit()
-    return advance(db, actor, load_run(db, actor, run_id), None, extractor, request_id)
+    return continue_message(
+        db,
+        actor,
+        load_run(db, actor, run_id),
+        request.message_id,
+        request.message,
+        extractor,
+        request_id,
+    )
+
+
+def continue_message(
+    db: Session,
+    actor: User,
+    run: AgentRun,
+    message_id: UUID,
+    message: str,
+    extractor: Extractor,
+    request_id: str,
+) -> RunResponse:
+    """原请求只命中其执行记录；成功返回当前任务，明确失败才允许手动重试。
+
+    升级前已完成消息不补造历史记录；只有旧任务末尾尚未完成的用户消息在首次再次处理时
+    纳入记录管理，created_at 表示此次纳管时间，不伪造过去的执行时间或次数。
+    """
+    execution = executions.load(db, run, message_id)
+    pending = (
+        run.status == "collecting"
+        and run.messages[-1]["id"] == str(message_id)
+        and run.messages[-1]["role"] == "user"
+    )
+    if execution is None:
+        if not pending:
+            return response(run)
+        # 新接收的消息已有原子创建的记录；此分支仅兼容升级前未完成的最后一条消息。
+        executions.accept(db, run, message_id, message, request_id)
+        try:
+            db.commit()
+        except IntegrityError:
+            # 两个旧任务重试同时首次纳管时，由唯一约束决定一条记录，另一请求复用它。
+            db.rollback()
+        run_id = run.id
+        run = load_run(db, actor, run_id)
+        execution = executions.load(db, run, message_id)
+        if execution is None:
+            raise HTTPException(503, "消息执行记录暂不可用，请稍后重试")
+    if execution.input_hash != executions.message_hash(message):
+        raise HTTPException(409, "相同消息标识不能用于不同内容")
+    # 首次纳管过程可能与其他请求交错，最终以重新读取的任务状态判断是否还能处理该消息。
+    pending = (
+        run.status == "collecting"
+        and run.messages[-1]["id"] == str(message_id)
+        and run.messages[-1]["role"] == "user"
+    )
+    if execution.status == "succeeded" or not pending or execution.accepted_version != run.version:
+        # 已完成、被后续消息取代、已取消或已进入财务执行的轮次只读当前 run。
+        # 不能为了返回旧结果重新生成确认 ID、延长预览期限或回退业务状态。
+        return response(run)
+    return advance(db, actor, run, execution, extractor, request_id)
 
 
 def advance(
     db: Session,
     actor: User,
     run: AgentRun,
-    request: RunMessageRequest | None,
+    execution: AgentExecution,
     extractor: Extractor,
     request_id: str,
 ) -> RunResponse:
+    """执行一轮计算；开始状态先提交，最终 run 与成功记录在同一事务提交。"""
     run_id, expected_version = run.id, run.version
     owner_id, tenant_id = actor.id, actor.tenant_id
+    execution_id = execution.id
     messages = list(run.messages)
-    if request:
-        messages.append({"id": str(request.message_id), "role": "user", "content": request.message})
     context = {
         "current_candidate": dict(run.candidate),
         "history": [
@@ -250,91 +321,101 @@ def advance(
         "anchor_date": run.anchor_date,
         "timezone": run.timezone,
     }
-    # 结束读取事务后才调用模型，不在网络等待期间持有数据库事务或行锁。
-    db.commit()
-    result = interpret(extractor, context)
-    actor = fresh_actor(db, owner_id, tenant_id)
-    extraction = result["extraction"]
-    missing, payload = result["missing"], result["payload"]
-    status = "awaiting_confirmation" if payload else "collecting"
-    if extraction.intent == "cancel":
-        status, missing, payload = "cancelled", [], None
-        text = "任务已取消，没有创建报销草稿。"
-    elif extraction.intent == "unsupported":
-        status, payload, missing = "collecting", None, []
-        text = (
-            "目前支持整理报销草稿。请描述费用，或使用表单；"
-            "知识问答和审批尚未接入。文字确认不会触发创建。"
+    # begin 提交 running 并结束读取事务；模型网络等待期间没有数据库事务或行锁。
+    attempt = executions.begin(db, execution, request_id)
+    if attempt is None:
+        return response(load_run(db, actor, run_id))
+    try:
+        result = interpret(extractor, context)
+        actor = fresh_actor(db, owner_id, tenant_id)
+        extraction = result["extraction"]
+        missing, payload = result["missing"], result["payload"]
+        status = "awaiting_confirmation" if payload else "collecting"
+        if extraction.intent == "cancel":
+            status, missing, payload = "cancelled", [], None
+            text = "任务已取消，没有创建报销草稿。"
+        elif extraction.intent == "unsupported":
+            status, payload, missing = "collecting", None, []
+            text = (
+                "目前支持整理报销草稿。请描述费用，或使用表单；"
+                "知识问答和审批尚未接入。文字确认不会触发创建。"
+            )
+        elif missing:
+            text = "请补充或修正：" + "；".join(missing[:6]) + "。尚未创建草稿。"
+        else:
+            text = (
+                "已整理草稿预览，请核对全部字段。只有点击“确认创建”才会创建草稿；"
+                "修改信息会使旧确认失效。"
+            )
+        candidate = (
+            context["current_candidate"]
+            if extraction.intent == "unsupported"
+            else extraction.candidate.model_dump(mode="json")
         )
-    elif missing:
-        text = "请补充或修正：" + "；".join(missing[:6]) + "。尚未创建草稿。"
-    else:
-        text = (
-            "已整理草稿预览，请核对全部字段。只有点击“确认创建”才会创建草稿；"
-            "修改信息会使旧确认失效。"
+        # 原始消息+每轮候选快照可定位字段在哪轮提出。快照是待确认提取，不代表已核实事实。
+        messages.append(
+            {
+                "id": str(uuid4()),
+                "role": "assistant",
+                "content": text,
+                "provenance": {
+                    "source_message_ids": [
+                        message["id"] for message in messages if message["role"] == "user"
+                    ],
+                    "prompt_version": PROMPT_VERSION,
+                    "candidate_snapshot": candidate,
+                },
+            }
         )
-    candidate = (
-        context["current_candidate"]
-        if extraction.intent == "unsupported"
-        else extraction.candidate.model_dump(mode="json")
-    )
-    # 原始消息+每轮候选快照可定位字段在哪轮提出。快照是待确认提取，不代表已核实事实。
-    messages.append(
-        {
-            "id": str(uuid4()),
-            "role": "assistant",
-            "content": text,
-            "provenance": {
-                "source_message_ids": [
-                    message["id"] for message in messages if message["role"] == "user"
-                ],
-                "prompt_version": PROMPT_VERSION,
-                "candidate_snapshot": candidate,
-            },
+        new_version = expected_version + 1
+        values = {
+            "status": status,
+            "version": new_version,
+            "messages": messages,
+            "candidate": candidate,
+            "missing_fields": missing,
+            "preview_payload": payload,
+            "preview_version": new_version if payload else None,
+            "confirmation_id": uuid4() if payload else None,
+            "preview_hash": payload_hash(CreateExpenseInput.model_validate(payload))
+            if payload
+            else None,
+            "expires_at": datetime.now(UTC)
+            + timedelta(seconds=get_settings().agent_confirmation_ttl_seconds)
+            if payload
+            else None,
         }
-    )
-    new_version = expected_version + 1
-    values = {
-        "status": status,
-        "version": new_version,
-        "messages": messages,
-        "candidate": candidate,
-        "missing_fields": missing,
-        "preview_payload": payload,
-        "preview_version": new_version if payload else None,
-        "confirmation_id": uuid4() if payload else None,
-        "preview_hash": payload_hash(CreateExpenseInput.model_validate(payload))
-        if payload
-        else None,
-        "expires_at": datetime.now(UTC)
-        + timedelta(seconds=get_settings().agent_confirmation_ttl_seconds)
-        if payload
-        else None,
-    }
-    changed = db.execute(
-        update(AgentRun)
-        .where(
-            AgentRun.id == run_id,
-            AgentRun.owner_id == owner_id,
-            AgentRun.tenant_id == tenant_id,
-            AgentRun.version == expected_version,
-            AgentRun.status.in_(["collecting", "awaiting_confirmation"]),
+        changed = db.execute(
+            update(AgentRun)
+            .where(
+                AgentRun.id == run_id,
+                AgentRun.owner_id == owner_id,
+                AgentRun.tenant_id == tenant_id,
+                AgentRun.version == expected_version,
+                AgentRun.status.in_(["collecting", "awaiting_confirmation"]),
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if changed != 1:
+            db.rollback()
+            raise HTTPException(409, "任务已被其他请求更新，请刷新；本次没有创建草稿")
+        # 助手消息、预览与执行成功必须原子提交；结果引用只指向本次确实保存的版本。
+        executions.succeed(db, execution_id, attempt, new_version, UUID(messages[-1]["id"]))
+        db.commit()
+        logger.info(
+            "Agent message requestId=%s runId=%s executionId=%s attempt=%s version=%s status=%s",
+            request_id,
+            run_id,
+            execution_id,
+            attempt,
+            new_version,
+            status,
         )
-        .values(**values)
-        .execution_options(synchronize_session=False)
-    ).rowcount
-    if changed != 1:
-        db.rollback()
-        raise HTTPException(409, "任务已被其他请求更新，请刷新；本次没有创建草稿")
-    db.commit()
-    logger.info(
-        "Agent message requestId=%s runId=%s version=%s status=%s",
-        request_id,
-        run_id,
-        new_version,
-        status,
-    )
-    return response(load_run(db, actor, run_id))
+        return response(load_run(db, actor, run_id))
+    except Exception as exc:
+        executions.fail(db, execution_id, attempt, exc)
+        raise
 
 
 def confirm_run(

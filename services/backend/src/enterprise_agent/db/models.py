@@ -151,6 +151,8 @@ class AgentRun(Base):
 
     __tablename__ = "agent_runs"
     __table_args__ = (
+        # 执行记录通过复合外键绑定任务及其所有者，防止在数据库层关联到其他租户的任务。
+        UniqueConstraint("tenant_id", "owner_id", "id", name="uq_agent_run_scope"),
         ForeignKeyConstraint(["tenant_id", "owner_id"], ["users.tenant_id", "users.id"]),
         ForeignKeyConstraint(["tenant_id", "expense_id"], ["expenses.tenant_id", "expenses.id"]),
         UniqueConstraint("tenant_id", "owner_id", "client_request_id", name="uq_agent_run_request"),
@@ -181,3 +183,53 @@ class AgentRun(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expense_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentExecution(Base):
+    """一条用户消息的一轮计算记录；不是财务操作台账，也不是后台任务队列。
+
+    同一消息失败后手动重试仍使用此记录，attempt_count 表示实际开始计算的次数。
+    结果通过 run 版本和助手消息 ID 定位，避免再存一份对话或确认凭据。
+    """
+
+    __tablename__ = "agent_executions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "owner_id", "run_id"],
+            ["agent_runs.tenant_id", "agent_runs.owner_id", "agent_runs.id"],
+        ),
+        UniqueConstraint("run_id", "message_id", name="uq_agent_execution_message"),
+        CheckConstraint("accepted_version >= 0", name="ck_agent_execution_accepted_version"),
+        CheckConstraint("attempt_count >= 0", name="ck_agent_execution_attempt_count"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="ck_agent_execution_status",
+        ),
+        CheckConstraint(
+            "(status = 'succeeded' AND result_version > accepted_version "
+            "AND result_version IS NOT NULL AND result_message_id IS NOT NULL "
+            "AND finished_at IS NOT NULL) OR "
+            "(status <> 'succeeded' AND result_version IS NULL AND result_message_id IS NULL)",
+            name="ck_agent_execution_result",
+        ),
+        Index("ix_agent_execution_run", "tenant_id", "owner_id", "run_id", "created_at"),
+    )
+    # 身份只由已鉴权的 run 注入，消息正文保存在 run 中，此处仅保存规范化输入的哈希。
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid)
+    owner_id: Mapped[UUID] = mapped_column(Uuid)
+    run_id: Mapped[UUID] = mapped_column(Uuid)
+    message_id: Mapped[UUID] = mapped_column(Uuid)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    accepted_version: Mapped[int] = mapped_column(Integer)
+    request_id: Mapped[str] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    # started_at 是最近一次手动尝试的开始时间；running 没有租约，不因经过时间而自动失败。
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_message_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    # 仅记录稳定错误类别，禁止把模型原文、异常正文或凭据写入追踪记录。
+    error_code: Mapped[str | None] = mapped_column(String(32), nullable=True)

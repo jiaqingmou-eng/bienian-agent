@@ -6,12 +6,13 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
+from sqlalchemy.exc import SQLAlchemyError
 
-from enterprise_agent.agent import service
+from enterprise_agent.agent import executions, service
 from enterprise_agent.agent.model import get_extractor
 from enterprise_agent.agent.schemas import Extraction
-from enterprise_agent.db.models import AgentRun, AuditLog, Expense, Tenant, User
+from enterprise_agent.db.models import AgentExecution, AgentRun, AuditLog, Expense, Tenant, User
 from enterprise_agent.main import app
 
 from conftest import headers
@@ -425,3 +426,200 @@ def test_history_rejects_invalid_or_authoritative_query(client, query):
 
 def test_history_requires_authentication(client):
     assert client.get("/api/v1/agent/runs").status_code == 401
+
+
+def test_execution_records_initial_and_followup_messages_once(client, db, model):
+    """真实 HTTP 重放只读既有结果，执行记录可定位到实际保存的助手消息和版本。"""
+    before = counts(db)
+    request_id = str(uuid4())
+    first = start(client, client_request_id=request_id).json()
+    for _ in range(3):
+        assert start(client, client_request_id=request_id).json() == first
+    execution = db.scalar(select(AgentExecution))
+    assert execution.message_id == UUID(request_id)
+    assert execution.input_hash == executions.message_hash(first["messages"][0]["content"])
+    assert execution.accepted_version == 0 and execution.result_version == first["version"]
+    assert str(execution.result_message_id) == first["messages"][-1]["id"]
+    assert execution.status == "succeeded" and execution.attempt_count == 1
+    assert execution.created_at <= execution.started_at <= execution.finished_at
+    assert execution.error_code is None
+    assert execution.tenant_id == db.get(AgentRun, UUID(first["id"])).tenant_id
+    # 内部执行字段未混入公共响应；不需要修改 OpenAPI 或前端 transport types。
+    assert "executions" not in first
+    mid = str(uuid4())
+    updated = message(client, first, message_id=mid).json()
+    for _ in range(3):
+        assert message(client, first, message_id=mid).json() == updated
+    second = db.scalar(select(AgentExecution).where(AgentExecution.message_id == UUID(mid)))
+    assert second.accepted_version == first["version"] + 1
+    assert second.result_version == updated["version"] and second.attempt_count == 1
+    assert db.scalar(select(func.count()).select_from(AgentExecution)) == 2
+    assert len(model.calls) == 2 and counts(db) == before
+    assert message(client, updated, text="相同标识换内容", message_id=mid).status_code == 409
+    # 后续轮次完成后重放初始消息仍返回当前 run，不能回退旧确认或重新签发预览。
+    assert start(client, client_request_id=request_id).json() == updated
+
+
+def test_execution_queued_and_running_are_persisted_before_model(client, db, model, monkeypatch):
+    """在开始标记与模型调用两个边界观察持久状态，确认模型不占用数据库事务。"""
+    run = start(client).json()
+    original_begin = executions.begin
+
+    def observe_acceptance(db, execution, request_id):
+        """消息已接收时，旧确认已撤销且 queued 记录已经提交。"""
+        assert db.in_transaction()  # 读取 run / 执行记录可开启新的短事务。
+        assert execution.status == "queued" and execution.attempt_count == 0
+        saved = db.get(AgentRun, execution.run_id, populate_existing=True)
+        assert saved.preview_payload is None and saved.confirmation_id is None
+        assert saved.messages[-1]["id"] == str(execution.message_id)
+        return original_begin(db, execution, request_id)
+
+    def observe_model():
+        """开始状态已提交，模型等待期间不会继续持有上一段读取事务。"""
+        assert not db.in_transaction()
+        record = db.scalar(select(AgentExecution).where(AgentExecution.status == "running"))
+        assert record is not None and record.started_at is not None and record.finished_at is None
+        db.commit()
+
+    monkeypatch.setattr(executions, "begin", observe_acceptance)
+    model.on_call = observe_model
+    assert message(client, run).status_code == 200
+
+
+@pytest.mark.parametrize("followup", [False, True])
+def test_execution_failure_and_manual_retry_reuse_one_record(client, db, model, followup):
+    """明确失败可由用户手动重试，保留接收版本和记录 ID，只增加尝试次数。"""
+    run = start(client).json() if followup else None
+    mid = str(uuid4())
+
+    def submit():
+        """对初始消息与后续消息使用完全相同的重试标识。"""
+        return message(client, run, message_id=mid) if run else start(client, client_request_id=mid)
+
+    model.failure = HTTPException(503, "不应保存的模型正文或凭据")
+    assert submit().status_code == 503
+    saved = db.scalar(select(AgentExecution).where(AgentExecution.message_id == UUID(mid)))
+    record_id, accepted_version = saved.id, saved.accepted_version
+    assert saved.status == "failed" and saved.error_code == "HTTP_503"
+    assert saved.finished_at is not None and saved.result_version is None
+    model.failure = None
+    result = submit()
+    assert result.status_code == (200 if followup else 201)
+    db.expire_all()
+    saved = db.get(AgentExecution, record_id)
+    assert saved.status == "succeeded" and saved.error_code is None and saved.attempt_count == 2
+    assert saved.accepted_version == accepted_version
+    assert sum(item["id"] == mid for item in result.json()["messages"]) == 1
+
+
+@pytest.mark.parametrize("followup", [False, True])
+def test_execution_insert_failure_rolls_back_message_and_confirmation(client, db, model, followup):
+    """向执行表写入时注入故障，验证消息接收、旧确认撤销和记录创建整体回滚。"""
+    run = start(client).json() if followup else None
+    before = db.scalar(select(func.count()).select_from(AgentExecution))
+    calls = len(model.calls)
+
+    def reject_insert(_mapper, _connection, _target):
+        """在真实 ORM flush 阶段失败，而非绕过业务服务模拟接收逻辑。"""
+        raise SQLAlchemyError("injected execution insert failure")
+
+    event.listen(AgentExecution, "before_insert", reject_insert)
+    try:
+        result = message(client, run) if run else start(client)
+        assert result.status_code == 503
+    finally:
+        event.remove(AgentExecution, "before_insert", reject_insert)
+        # HTTP 的请求级 Session 正常会在关闭时回滚；测试共用 Session，需要显式模拟该动作。
+        db.rollback()
+    assert db.scalar(select(func.count()).select_from(AgentExecution)) == before
+    assert len(model.calls) == calls
+    if run:
+        assert client.get(f"/api/v1/agent/runs/{run['id']}", headers=headers()).json() == run
+    else:
+        assert db.scalar(select(func.count()).select_from(AgentRun)) == 0
+
+
+def test_execution_result_and_success_commit_together(client, db, model, monkeypatch):
+    """写完 run 和执行成功、事务提交前故障，不能留下单边成功的预览。"""
+    original_succeed = executions.succeed
+    mid = str(uuid4())
+
+    def fail_before_commit(*args):
+        """先执行真实的两个 UPDATE，再在同一事务提交前注入数据库错误。"""
+        original_succeed(*args)
+        raise SQLAlchemyError("injected result commit failure")
+
+    monkeypatch.setattr(executions, "succeed", fail_before_commit)
+    assert start(client, client_request_id=mid).status_code == 503
+    record = db.scalar(select(AgentExecution))
+    run = db.get(AgentRun, record.run_id)
+    assert record.status == "failed" and record.error_code == "DATABASE_ERROR"
+    assert record.result_version is None and record.result_message_id is None
+    assert run.version == 0 and run.preview_payload is None and len(run.messages) == 1
+    monkeypatch.setattr(executions, "succeed", original_succeed)
+    assert start(client, client_request_id=mid).status_code == 201
+    db.expire_all()
+    assert db.scalar(select(AgentExecution)).attempt_count == 2
+
+
+def test_execution_success_survives_response_loss(client, db, model, monkeypatch):
+    """事务已提交后返回响应失败，不应把成功记录回写为 failed 或再次调用模型。"""
+    mid = str(uuid4())
+    original_response = service.response
+
+    def lose_response(_run):
+        """模拟持久结果成功后，客户端未能拿到完整响应。"""
+        raise HTTPException(503, "injected response loss")
+
+    monkeypatch.setattr(service, "response", lose_response)
+    assert start(client, client_request_id=mid).status_code == 503
+    record = db.scalar(select(AgentExecution))
+    assert record.status == "succeeded" and record.error_code is None
+    monkeypatch.setattr(service, "response", original_response)
+    assert start(client, client_request_id=mid).json()["version"] == record.result_version
+    assert len(model.calls) == 1 and record.attempt_count == 1
+
+
+def test_execution_running_duplicate_does_not_start_another_attempt(client, db, model):
+    """同一请求在模型尚未返回时重入，只命中 running 状态并返回冲突。"""
+    from enterprise_agent.agent.schemas import StartRunRequest
+
+    mid = uuid4()
+
+    def repeat_request():
+        """在模型回调中用同一服务入口重试，不模拟 run 级租约或后台调度。"""
+        record = db.scalar(select(AgentExecution))
+        actor = db.get(User, record.owner_id)
+        with pytest.raises(HTTPException) as denied:
+            service.start_run(
+                db,
+                actor,
+                StartRunRequest(client_request_id=mid, message="昨天成都到上海高铁286元，拜访客户"),
+                model,
+                str(uuid4()),
+            )
+        assert denied.value.status_code == 409
+
+    model.on_call = repeat_request
+    assert start(client, client_request_id=str(mid)).status_code == 201
+    assert len(model.calls) == 1
+    assert db.scalar(select(AgentExecution)).attempt_count == 1
+
+
+def test_execution_process_interruption_keeps_running_without_automatic_retry(db, model):
+    """进程级中断不是明确计算失败；P2-01 不把 running 自动改为失败或抢占重跑。"""
+    from enterprise_agent.agent.schemas import StartRunRequest
+    from enterprise_agent.db.seed import DEMO_ACCOUNTS
+
+    actor = db.get(User, DEMO_ACCOUNTS["employee_a"])
+    request = StartRunRequest(client_request_id=uuid4(), message="虚构高铁286元")
+    model.failure = SystemExit("simulated process interruption")
+    with pytest.raises(SystemExit):
+        service.start_run(db, actor, request, model, str(uuid4()))
+    db.rollback()
+    record = db.scalar(select(AgentExecution))
+    assert record.status == "running" and record.finished_at is None
+    model.failure = None
+    with pytest.raises(HTTPException) as denied:
+        service.start_run(db, actor, request, model, str(uuid4()))
+    assert denied.value.status_code == 409 and len(model.calls) == 1

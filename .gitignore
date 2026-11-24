@@ -12,3 +12,7 @@ __pycache__/
 *.log
 .DS_Store
 work/
+docs/
+docs
+plan.md
+.vscode/
