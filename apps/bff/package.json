@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src test",
     "test": "jest --runInBand",
-    "contracts:generate": "openapi-typescript ../../contracts/backend.openapi.json -o src/backend/backend.schema.ts"
+    "contracts:generate": "openapi-typescript ../../contracts/backend.openapi.json -o src/backend/backend.schema.ts && prettier --write src/backend/backend.schema.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.11",

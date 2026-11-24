@@ -144,3 +144,40 @@ class AuditLog(Base):
     request_id: Mapped[str] = mapped_column(String(36))
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AgentRun(Base):
+    """P1 持久任务快照；确认与业务结果可对账，不等同于 LangGraph checkpoint。"""
+
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "owner_id"], ["users.tenant_id", "users.id"]),
+        ForeignKeyConstraint(["tenant_id", "expense_id"], ["expenses.tenant_id", "expenses.id"]),
+        UniqueConstraint("tenant_id", "owner_id", "client_request_id", name="uq_agent_run_request"),
+        CheckConstraint("version >= 0", name="ck_agent_run_version"),
+        CheckConstraint(
+            "status IN ('collecting', 'awaiting_confirmation', 'executing', "
+            "'completed', 'cancelled')",
+            name="ck_agent_run_status",
+        ),
+        Index("ix_agent_run_owner", "tenant_id", "owner_id", "created_at"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"))
+    owner_id: Mapped[UUID] = mapped_column(Uuid)
+    client_request_id: Mapped[UUID] = mapped_column(Uuid)
+    input_hash: Mapped[str] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="collecting")
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    anchor_date: Mapped[str] = mapped_column(String(10))
+    timezone: Mapped[str] = mapped_column(String(64))
+    candidate: Mapped[dict] = mapped_column(JSON, default=dict)
+    messages: Mapped[list] = mapped_column(JSON, default=list)
+    missing_fields: Mapped[list] = mapped_column(JSON, default=list)
+    preview_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confirmation_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    preview_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    preview_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expense_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

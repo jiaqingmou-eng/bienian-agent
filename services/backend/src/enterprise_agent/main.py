@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from enterprise_agent.agent.routes import router as agent_router
 from enterprise_agent.api.routes import router
 from enterprise_agent.api.schemas import ErrorResponse, ValidationIssue
 from enterprise_agent.config import get_settings
@@ -26,6 +27,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Enterprise Finance API", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
+app.include_router(agent_router)
 
 
 @app.middleware("http")

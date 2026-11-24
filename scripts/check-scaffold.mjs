@@ -9,9 +9,21 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 async function walk(directory) {
   const paths = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
-    if (['node_modules', '.git', '.venv', 'work', 'dist', '__pycache__'].includes(entry.name)) continue;
+    if (
+      [
+        'node_modules',
+        '.git',
+        '.venv',
+        'work',
+        'dist',
+        '__pycache__',
+        '.pytest_cache',
+        '.ruff_cache',
+      ].includes(entry.name)
+    )
+      continue;
     const path = resolve(directory, entry.name);
-    if (entry.isDirectory()) paths.push(...await walk(path));
+    if (entry.isDirectory()) paths.push(...(await walk(path)));
     else paths.push(path);
   }
   return paths;
@@ -29,14 +41,20 @@ for (const path of paths) {
     if (!specifier.startsWith('.')) continue;
     const target = resolve(dirname(path), specifier);
     assert.ok(
-      ['', '.ts', '.tsx', '.css', '/index.ts', '/index.tsx'].some((suffix) => existsSync(target + suffix)),
+      ['', '.ts', '.tsx', '.css', '/index.ts', '/index.tsx'].some((suffix) =>
+        existsSync(target + suffix),
+      ),
       `Missing local import: ${relative(root, path)} -> ${specifier}`,
     );
     const sourceApp = relative(root, path).replaceAll('\\', '/').split('/').slice(0, 2).join('/');
-    assert.ok(relative(root, target).replaceAll('\\', '/').startsWith(`${sourceApp}/`),
-      `Cross-application source import: ${relative(root, path)}`);
+    assert.ok(
+      relative(root, target).replaceAll('\\', '/').startsWith(`${sourceApp}/`),
+      `Cross-application source import: ${relative(root, path)}`,
+    );
     imports++;
   }
 }
 console.log(`Scaffold preflight passed: ${paths.length} files, ${imports} local imports.`);
-console.log('This preflight does not replace dependency installation, type checking or integration tests.');
+console.log(
+  'This preflight does not replace dependency installation, type checking or integration tests.',
+);

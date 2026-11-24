@@ -2,8 +2,10 @@
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 从当前文件位置推导仓库根目录，不依赖启动命令所在的工作目录。
@@ -23,6 +25,42 @@ class Settings(BaseSettings):
     node_env: str = "development"
     backend_host: str = "127.0.0.1"
     backend_port: int = 8000
+    llm_api_key: SecretStr = SecretStr("")
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = Field(default="gpt-4.1-mini", min_length=1, max_length=100)
+    llm_timeout_seconds: float = Field(default=20, ge=1, le=60)
+    llm_max_output_tokens: int = Field(default=1600, ge=200, le=4000)
+    agent_timezone: str = "Asia/Hong_Kong"
+    agent_confirmation_ttl_seconds: int = Field(default=900, ge=60, le=3600)
+
+    @field_validator("llm_base_url")
+    @classmethod
+    def safe_model_endpoint(cls, value: str) -> str:
+        """模型地址仅由部署配置指定，禁止在用户请求中注入端点或凭据。"""
+        parsed = urlsplit(value)
+        local_http = parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
+        if (
+            not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or (parsed.scheme != "https" and not local_http)
+        ):
+            raise ValueError(
+                "LLM_BASE_URL requires HTTPS (HTTP only for loopback), no credentials/query"
+            )
+        return value.rstrip("/")
+
+    @field_validator("agent_timezone")
+    @classmethod
+    def valid_timezone(cls, value: str) -> str:
+        """相对日期使用已配置的 IANA 时区，在任务创建时锚定。"""
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("AGENT_TIMEZONE must be an IANA timezone") from exc
+        return value
 
     @field_validator("internal_jwt_secret")
     @classmethod

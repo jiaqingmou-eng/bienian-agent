@@ -1,6 +1,6 @@
 # 知账 · Enterprise Agent
 
-企业财务报销 Agent 原型。第一天实现 React 页面、NestJS BFF、FastAPI 业务后端，以及报销草稿的数据库链路。
+企业财务报销 Agent 原型。已有 React、NestJS BFF、FastAPI 和报销草稿数据库链路，P1 新增自然语言整理、澄清、预览与明确确认后创建草稿。
 
 ## 当前能力
 
@@ -8,18 +8,19 @@
 - 员工查看自己的申请，新增报销草稿，查看费用明细。
 - 财务查看同企业已提交的申请；其他员工的草稿保持私有。
 - 服务端按整数“分”计算总额；幂等创建；同事务记录审计。
-- 六张业务表、Alembic 初始迁移和可重复执行的虚构种子数据。
+- 六张财务业务表、Agent 任务快照表、新增 Alembic 迁移和可重复执行的虚构种子数据。
 - OpenAPI 导出、TypeScript 类型生成入口、独立 Dockerfile 和 Compose。
+- 报销助手页面、OpenAI 兼容模型适配器、LangGraph 字段整理、持久预览与确认门禁；模型配置放在根目录 `.env`。
 
-第一天没有接入模型、RAG、审批执行或发票识别。页面中的待审批样例由种子脚本生成，不能在当前版本操作批准或驳回。
+模型接入、配置与验收见 [P1 说明](docs/p1.md)。真实模型需要填写 `LLM_API_KEY`，当前尚未完成真实模型端到端验收。RAG、正式审批执行和发票识别尚未接入；待审批样例由种子脚本生成。
 
 ## 工程边界
 
-Pydantic 请求和响应模型集中在 `services/backend/src/enterprise_agent/api/schemas.py`：FastAPI 依据请求 schema 校验 body、query、path/header 参数，并依据 response_model 过滤和校验成功响应；统一错误响应也使用同一组 schema。财务服务的内部命令模型保留在 `finance/schemas.py`。
+财务 Pydantic 请求和响应模型位于 `services/backend/src/enterprise_agent/api/schemas.py`，Agent 协议位于 `agent/schemas.py`。FastAPI 校验请求并按 response_model 序列化响应；财务内部命令模型保留在 `finance/schemas.py`。
 
 ```text
 浏览器 → React → NestJS BFF → FastAPI → PostgreSQL
-                                └→ 后续 LangGraph / RAG / MCP
+                                └→ P1 LangGraph / 后续 RAG、MCP
 ```
 
 | 目录               | 职责                                      |
@@ -105,11 +106,13 @@ pnpm contracts:generate
 
 无依赖预检查只验证目录、JSON 和本地导入，不能代替 TypeScript 编译、Python 测试或端到端验证。当前执行结果见 `docs/day-1.md`。
 
+P0 的详细操作步骤、测试用例、预期状态码和结果记录方式见 [P0 验收指南](docs/p0-verification.md)。
+
 ## 协议生成
 
 Pydantic 模型是 Python HTTP 协议的来源。`pnpm contracts:generate` 先导出 `contracts/backend.openapi.json`，再更新 BFF 的 `backend.schema.ts`。
 
-仓库目前包含一份手工对齐的初始类型快照，尚未冒充自动生成结果。首次安装成功后请运行生成命令、检查差异，并提交协议快照。前端目前独立维护精简的 BFF 响应类型，协议见 `docs/api-boundaries.md`。
+仓库协议快照已由生成命令更新；BFF 生成步骤同时使用 Prettier 保持输出稳定。前端独立维护 BFF 响应类型，协议见 `docs/api-boundaries.md`。
 
 ## 演示环境约束
 
@@ -118,11 +121,11 @@ Pydantic 模型是 Python HTTP 协议的来源。`pnpm contracts:generate` 先�
 - BFF 在 `NODE_ENV=production` 下拒绝启动。生产部署前需要真实认证、持久化会话与 HTTPS 配置。
 - Python 只接受短时、限定签发者及接收方的 BFF JWT；角色和企业信息重新从数据库读取。
 - `.env` 不提交、不打包；外部追踪系统尚未启用。
-- 当前环境无法联网安装依赖，因此没有生成可信的 `pnpm-lock.yaml`、`uv.lock`。首次联网安装后应提交锁文件，CI 和镜像构建再切换为锁定安装。当前 Dockerfile 的依赖安装尚未锁定。
+- 两份锁文件已存在，本地安装使用 `pnpm install --frozen-lockfile` 与 `uv sync --locked --directory services/backend`。CI 和 Docker 的锁定安装改造仍是 P0 待办。
 
-## 第二天
+## 后续计划
 
-添加虚构财务制度、文档入库和 pgvector 检索；从现有 FastAPI 扩展带引用的制度问答，不改变报销业务服务的所有权。
+后续以根目录 [plam.md](plam.md) 为主计划，按阶段验收推进。下一阶段先核验现有底座，再实现单 Agent 的“自然语言描述 → 缺项澄清 → 草稿预览 → 用户明确确认 → 调用财务服务创建草稿”。之后补齐持久化执行与恢复，再建设可追溯 RAG、正式审批、记忆、Skills、MCP 和生产运行能力。
 
 ## 数据库端口
 

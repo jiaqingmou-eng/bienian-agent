@@ -10,6 +10,7 @@ import { OriginGuard, SessionGuard } from './common/guards';
 import { validateEnvironment } from './config/environment';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthController } from './health.controller';
+import { AgentModule } from './agent/agent.module';
 
 @Module({
   imports: [
@@ -28,16 +29,22 @@ import { HealthController } from './health.controller';
         // Log operational metadata only; never serialize financial bodies or tokens.
         serializers: {
           req: (req: { id: string; method: string; url: string }) => ({
-            id: req.id, method: req.method, path: req.url?.split('?')[0],
+            id: req.id,
+            method: req.method,
+            path: req.url?.split('?')[0],
           }),
           res: (res: { statusCode: number }) => ({ statusCode: res.statusCode }),
-          err: (err: { type?: string; message?: string }) => ({ type: err.type, message: err.message }),
+          err: (err: { type?: string; message?: string }) => ({
+            type: err.type,
+            message: err.message,
+          }),
         },
       },
     }),
     BackendModule,
     AuthModule,
     ExpensesModule,
+    AgentModule,
   ],
   controllers: [HealthController],
   providers: [

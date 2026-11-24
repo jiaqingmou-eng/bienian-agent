@@ -16,6 +16,7 @@ export class BackendClient {
       body?: unknown;
       requestId?: string;
       idempotencyKey?: string;
+      timeoutMs?: number;
     } = {},
   ): Promise<T> {
     const token = sign(
@@ -23,7 +24,7 @@ export class BackendClient {
       this.config.getOrThrow<string>('INTERNAL_JWT_SECRET'),
       {
         algorithm: 'HS256',
-        subject: options.demo ? 'demo-bootstrap' : options.userId ?? 'bff-health',
+        subject: options.demo ? 'demo-bootstrap' : (options.userId ?? 'bff-health'),
         issuer: 'enterprise-bff',
         audience: 'enterprise-backend',
         expiresIn: 60,
@@ -42,7 +43,7 @@ export class BackendClient {
         method: options.method ?? 'GET',
         headers,
         body: options.body === undefined ? undefined : JSON.stringify(options.body),
-        signal: AbortSignal.timeout(10_000),
+        signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
         redirect: 'error',
       });
     } catch {
@@ -56,8 +57,12 @@ export class BackendClient {
     }
     if (!response.ok) {
       const message =
-        typeof body === 'object' && body !== null && 'message' in body &&
-        typeof body.message === 'string' ? body.message : '财务服务请求失败';
+        typeof body === 'object' &&
+        body !== null &&
+        'message' in body &&
+        typeof body.message === 'string'
+          ? body.message
+          : '财务服务请求失败';
       throw new HttpException(message, response.status >= 500 ? 503 : response.status);
     }
     return body as T;

@@ -31,7 +31,13 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)",
+        ]
       interval: 5s
       timeout: 4s
       retries: 15
@@ -39,8 +45,13 @@ services:
   bff:
     build:
       context: ../apps/bff
-    env_file: ../.env
     environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:5173}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET}
+      INTERNAL_JWT_SECRET: ${INTERNAL_JWT_SECRET:?Set INTERNAL_JWT_SECRET}
+      ENABLE_DEMO_LOGIN: ${ENABLE_DEMO_LOGIN:-false}
+      BFF_PORT: ${BFF_PORT:-3000}
       BACKEND_URL: http://backend:8000
       BFF_HOST: 0.0.0.0
     ports:

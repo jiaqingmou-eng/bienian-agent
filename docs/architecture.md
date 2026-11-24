@@ -25,9 +25,9 @@ PostgreSQL 的 tenants、users、expenses、expense_items、approvals、audit_lo
 - 员工只可读本人申请。财务可读同企业已提交申请，以及自己的草稿。
 - 草稿创建、明细和审计同事务提交。
 - 幂等键的唯一范围是企业、申请人、键；相同键不同内容返回409。
-- approvals 绑定申请版本，执行审批与版本失效逻辑在第六天补齐。
+- approvals 绑定申请版本，执行审批与版本失效逻辑按 [主计划](../plam.md) 的 P4 阶段补齐。
 
-## 后续 Agent
+## Agent 与后续演进
 
 ```text
 HTTP Controller ───────────┐
@@ -35,7 +35,9 @@ HTTP Controller ───────────┐
 Agent → Tool → Finance Service → Database
 ```
 
-LangGraph 放在 Python 服务中，调用同一套财务服务。不能让 Agent 直接绕过权限写表。Checkpoint 保存执行进度，报销表保存业务状态。
+P1 的 LangGraph 在 Python 中执行提取与字段校验；`agent_runs` 保存消息、候选、版本化预览与确认结果。明确确认后，服务端通过唯一受控工具调用同一套财务服务，不能直接绕过权限写表。详细配置和验证见 [P1 说明](p1.md)。
+
+P1 快照不等于持久化 LangGraph checkpoint；P2 再补完整图恢复与任务执行器。财务表始终保存业务事实，图与任务状态不替代业务状态。
 
 - RAG：制度文档与适用版本、章节引用。
 - Skills：业务步骤及工具白名单，配置不替代服务端授权。
