@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
     Uuid,
@@ -233,3 +234,69 @@ class AgentExecution(Base):
     result_message_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     # 仅记录稳定错误类别，禁止把模型原文、异常正文或凭据写入追踪记录。
     error_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+
+class KnowledgeDocument(Base):
+    """一份制度的不可变内容版本；原件与清洗结果分开保存，不充当检索片段表。
+
+    同一企业的 source_key 标识逻辑来源，version 标识该来源的具体版本。
+    管理服务只允许发布状态改变，正文、适用日期或阅读范围调整必须登记新版本。
+    """
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        ForeignKeyConstraint(["tenant_id", "owner_id"], ["users.tenant_id", "users.id"]),
+        UniqueConstraint("tenant_id", "source_key", "version", name="uq_knowledge_source_version"),
+        CheckConstraint("version >= 1", name="ck_knowledge_version"),
+        CheckConstraint("format IN ('markdown', 'text')", name="ck_knowledge_format"),
+        CheckConstraint("visibility IN ('tenant', 'owner')", name="ck_knowledge_visibility"),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'withdrawn')", name="ck_knowledge_status"
+        ),
+        CheckConstraint(
+            "effective_until IS NULL OR effective_until >= effective_from",
+            name="ck_knowledge_dates",
+        ),
+        Index("ix_knowledge_access", "tenant_id", "status", "created_at"),
+    )
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"))
+    owner_id: Mapped[UUID] = mapped_column(Uuid)
+    source_key: Mapped[str] = mapped_column(String(80))
+    title: Mapped[str] = mapped_column(String(200))
+    version: Mapped[int] = mapped_column(Integer)
+    format: Mapped[str] = mapped_column(String(16))
+    effective_from: Mapped[date]
+    effective_until: Mapped[date | None] = mapped_column(nullable=True)
+    visibility: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), default="draft")
+    # 精确保留输入字节（包括 BOM 和原换行）；哈希用于识别同版本内容冲突。
+    original_bytes: Mapped[bytes] = mapped_column(LargeBinary)
+    content_hash: Mapped[str] = mapped_column(String(64))
+    # JSON 保存经确定性校验的章节结构及原文行映射，P3A-02 才生成检索 chunk。
+    normalized_document: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class KnowledgeIndex(Base):
+    """单个制度版本的完整检索快照；只有一次性提交成功的快照才对查询可见。
+
+    不重复存租户 / 所有者，所有读取必须关联原文表检查当前权限与发布状态。
+    units 同时保存完整条款、子片段及词项，适用于当前受控小语料，不是向量索引。
+    """
+
+    __tablename__ = "knowledge_indexes"
+    __table_args__ = (
+        CheckConstraint(
+            "unit_count > 0 AND chunk_count >= unit_count", name="ck_knowledge_index_count"
+        ),
+    )
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("knowledge_documents.id"), primary_key=True
+    )
+    content_hash: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(String(40))
+    units: Mapped[list] = mapped_column(JSON)
+    unit_count: Mapped[int] = mapped_column(Integer)
+    chunk_count: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

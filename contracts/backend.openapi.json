@@ -1440,6 +1440,345 @@
           }
         }
       }
+    },
+    "/api/v1/knowledge/documents": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Documents",
+        "description": "分页读取当前身份可见的制度；调用方不能通过参数替换租户或责任人。",
+        "operationId": "documents_api_v1_knowledge_documents_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份凭据缺失、无效或过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权执行该操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键与现有请求冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数未通过校验",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "数据库或依赖服务暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/documents/{document_id}": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Document Detail",
+        "description": "读取固定制度版本的原文和统一结构；不以知道 UUID 作为访问凭证。",
+        "operationId": "document_detail_api_v1_knowledge_documents__document_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份凭据缺失、无效或过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权执行该操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键与现有请求冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数未通过校验",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "数据库或依赖服务暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/search": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Search",
+        "description": "只读条款查询使用 POST 正文传问题，避免问题出现在 URL / 访问日志里。",
+        "operationId": "search_api_v1_knowledge_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchDocumentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchDocumentsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份凭据缺失、无效或过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权执行该操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键与现有请求冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数未通过校验",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "数据库或依赖服务暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -1597,6 +1936,260 @@
         ],
         "title": "DemoLoginRequest",
         "description": "本地演示登录请求；账号只能从预先配置的演示账号中选择。"
+      },
+      "DocumentBlock": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "heading",
+              "paragraph",
+              "list",
+              "table",
+              "code"
+            ],
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "heading_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Heading Path"
+          },
+          "source_start_line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source Start Line"
+          },
+          "source_end_line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source End Line"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "text",
+          "heading_path",
+          "source_start_line",
+          "source_end_line"
+        ],
+        "title": "DocumentBlock",
+        "description": "结构块不是检索 chunk；行号始终映射到同一版本原件，采用一基闭区间。"
+      },
+      "DocumentDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "source_key": {
+            "type": "string",
+            "title": "Source Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "owner_name": {
+            "type": "string",
+            "title": "Owner Name"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "text"
+            ],
+            "title": "Format"
+          },
+          "effective_from": {
+            "type": "string",
+            "format": "date",
+            "title": "Effective From"
+          },
+          "effective_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Until"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "owner"
+            ],
+            "title": "Visibility"
+          },
+          "status": {
+            "type": "string",
+            "const": "published",
+            "title": "Status",
+            "default": "published"
+          },
+          "original_text": {
+            "type": "string",
+            "title": "Original Text"
+          },
+          "content_hash": {
+            "type": "string",
+            "title": "Content Hash"
+          },
+          "normalized_document": {
+            "$ref": "#/components/schemas/NormalizedDocument"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_key",
+          "title",
+          "version",
+          "owner_name",
+          "format",
+          "effective_from",
+          "effective_until",
+          "visibility",
+          "original_text",
+          "content_hash",
+          "normalized_document"
+        ],
+        "title": "DocumentDetail",
+        "description": "同时提供原文与章节结构，浏览器按纯文本展示，不能直接执行文档 HTML。"
+      },
+      "DocumentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "DocumentListResponse",
+        "description": "只返回当前用户可读的已发布版本；原文页仍会独立检查权限。"
+      },
+      "DocumentSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "source_key": {
+            "type": "string",
+            "title": "Source Key"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "owner_name": {
+            "type": "string",
+            "title": "Owner Name"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "markdown",
+              "text"
+            ],
+            "title": "Format"
+          },
+          "effective_from": {
+            "type": "string",
+            "format": "date",
+            "title": "Effective From"
+          },
+          "effective_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Until"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "tenant",
+              "owner"
+            ],
+            "title": "Visibility"
+          },
+          "status": {
+            "type": "string",
+            "const": "published",
+            "title": "Status",
+            "default": "published"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_key",
+          "title",
+          "version",
+          "owner_name",
+          "format",
+          "effective_from",
+          "effective_until",
+          "visibility"
+        ],
+        "title": "DocumentSummary",
+        "description": "员工可读的制度元数据，不公开内部租户标识和管理命令。"
       },
       "DraftPreview": {
         "properties": {
@@ -1877,6 +2470,32 @@
         "title": "HealthResponse",
         "description": "服务存活检查的响应结构。"
       },
+      "NormalizedDocument": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "policy-text-v1",
+            "title": "Schema Version",
+            "default": "policy-text-v1"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentBlock"
+            },
+            "type": "array",
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Blocks"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "blocks"
+        ],
+        "title": "NormalizedDocument",
+        "description": "清洗规则版本随内容一起保存，后续规则升级不能悄悄改写旧版依据。"
+      },
       "ReadyResponse": {
         "properties": {
           "status": {
@@ -2074,6 +2693,131 @@
           "created_at"
         ],
         "title": "RunSummary"
+      },
+      "SearchDocumentsRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 5
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchDocumentsRequest",
+        "description": "只接受问题、适用日期与条数；租户 / 权限 / 发布状态不由调用者指定。"
+      },
+      "SearchDocumentsResponse": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "as_of",
+          "limit",
+          "items"
+        ],
+        "title": "SearchDocumentsResponse",
+        "description": "候选条款最多返回 limit 条；空数组明确表示本次基线检索未命中，不等于制度无规定。"
+      },
+      "SearchHit": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/DocumentSummary"
+          },
+          "citation_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Citation Id"
+          },
+          "matched_chunk_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Matched Chunk Id"
+          },
+          "rule_version": {
+            "type": "string",
+            "const": "policy-chunks-v1",
+            "title": "Rule Version",
+            "default": "policy-chunks-v1"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "heading_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Heading Path"
+          },
+          "source_start_line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source Start Line"
+          },
+          "source_end_line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source End Line"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document",
+          "citation_id",
+          "matched_chunk_id",
+          "text",
+          "heading_path",
+          "source_start_line",
+          "source_end_line"
+        ],
+        "title": "SearchHit",
+        "description": "返回完整条款作为证据；匹配子片段单独标识，不把残缺句子当作完整适用条件。"
       },
       "StartRunRequest": {
         "properties": {

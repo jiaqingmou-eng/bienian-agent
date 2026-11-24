@@ -14,6 +14,7 @@ from enterprise_agent.agent.routes import router as agent_router
 from enterprise_agent.api.routes import router
 from enterprise_agent.api.schemas import ErrorResponse, ValidationIssue
 from enterprise_agent.config import get_settings
+from enterprise_agent.knowledge.routes import router as knowledge_router
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Enterprise Finance API", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 app.include_router(agent_router)
+app.include_router(knowledge_router)
 
 
 @app.middleware("http")

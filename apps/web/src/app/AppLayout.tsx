@@ -4,6 +4,7 @@ import {
   PlusOutlined,
   SafetyCertificateOutlined,
   RobotOutlined,
+  BookOutlined,
 } from '@ant-design/icons';
 import { Avatar, Button, Layout, Menu, Space, Tag, Typography, message } from 'antd';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
@@ -32,17 +33,26 @@ export function AppLayout() {
           selectedKeys={[
             location.pathname === '/assistant'
               ? 'assistant'
-              : location.pathname === '/expenses/new'
-                ? 'new'
-                : 'expenses',
+              : location.pathname.startsWith('/knowledge/documents')
+                ? 'knowledge'
+                : location.pathname === '/expenses/new'
+                  ? 'new'
+                  : 'expenses',
           ]}
           onClick={({ key }) =>
             navigate(
-              key === 'assistant' ? '/assistant' : key === 'new' ? '/expenses/new' : '/expenses',
+              key === 'knowledge'
+                ? '/knowledge/documents'
+                : key === 'assistant'
+                  ? '/assistant'
+                  : key === 'new'
+                    ? '/expenses/new'
+                    : '/expenses',
             )
           }
           items={[
             { key: 'assistant', icon: <RobotOutlined />, label: '报销助手' },
+            { key: 'knowledge', icon: <BookOutlined />, label: '报销制度' },
             {
               key: 'expenses',
               icon: <FileTextOutlined />,

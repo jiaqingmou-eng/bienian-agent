@@ -1,0 +1,9 @@
+{
+  "source_key": "demo-reimbursement",
+  "title": "示例科技报销制度（虚构）",
+  "version": 1,
+  "format": "markdown",
+  "effective_from": "2026-01-01",
+  "effective_until": null,
+  "visibility": "tenant"
+}

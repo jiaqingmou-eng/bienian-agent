@@ -1,5 +1,6 @@
 """创建可重复运行的虚构演示数据；脚本不会清空或覆盖现有业务记录。"""
 
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,9 @@ from enterprise_agent.db.models import Approval, Tenant, User
 from enterprise_agent.db.session import get_engine
 from enterprise_agent.finance.schemas import CreateExpenseInput
 from enterprise_agent.finance.service import create_expense
+from enterprise_agent.knowledge.retrieval import build_index
+from enterprise_agent.knowledge.schemas import RegisterDocument
+from enterprise_agent.knowledge.service import change_publication, register_document
 
 # 固定 UUID 让演示账号在重复初始化和测试中保持稳定。
 DEMO_TENANT_ID = UUID("10000000-0000-4000-8000-000000000001")
@@ -73,12 +77,40 @@ def seed(db: Session) -> None:
             db.commit()
 
 
+def seed_knowledge(db: Session) -> None:
+    """单独初始化虚构制度；旧版本升级测试仍可只调用财务 seed，不要求新表提前存在。"""
+    fixtures = Path(__file__).resolve().parents[1] / "knowledge" / "fixtures"
+    manager = db.get(User, DEMO_ACCOUNTS["finance"])
+    assert manager is not None
+    document = register_document(
+        db,
+        manager,
+        RegisterDocument.model_validate_json(
+            (fixtures / "reimbursement-v1.json").read_text(encoding="utf-8")
+        ),
+        (fixtures / "reimbursement-v1.md").read_bytes(),
+        "40000000-0000-4000-8000-000000000001",
+    )
+    # 重复初始化不覆盖原件，也不将已经撤回的版本重新发布。
+    if document.status == "draft":
+        change_publication(
+            db,
+            manager,
+            document.id,
+            publish=True,
+            request_id="40000000-0000-4000-8000-000000000001",
+        )
+    if document.status == "published":
+        build_index(db, manager, document.id, "40000000-0000-4000-8000-000000000001")
+
+
 def main() -> None:
     """仅在显式开启演示登录时运行种子数据，避免误写其他环境。"""
     if not get_settings().enable_demo_login:
         raise SystemExit("Set ENABLE_DEMO_LOGIN=true to explicitly enable fictional seed data")
     with Session(get_engine()) as db:
         seed(db)
+        seed_knowledge(db)
     print("Demo fixtures ready; existing business records were preserved.")
 
 

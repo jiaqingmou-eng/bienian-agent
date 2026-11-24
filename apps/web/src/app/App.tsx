@@ -7,6 +7,8 @@ import { LoginPage } from '../features/auth/LoginPage';
 import { AppLayout } from './AppLayout';
 import { useAuth } from './auth';
 import { AssistantPage } from '../features/agent/AssistantPage';
+import { DocumentsPage } from '../features/knowledge/DocumentsPage';
+import { DocumentPage } from '../features/knowledge/DocumentPage';
 
 function Protected() {
   const { user } = useAuth();
@@ -29,6 +31,8 @@ export function App() {
       <Route element={<Protected />}>
         <Route element={<AppLayout />}>
           <Route path="/assistant" element={<AssistantPage />} />
+          <Route path="/knowledge/documents" element={<DocumentsPage />} />
+          <Route path="/knowledge/documents/:id" element={<DocumentPage />} />
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/expenses/new" element={<NewExpensePage />} />
           <Route path="/expenses/:id" element={<ExpenseDetailPage />} />

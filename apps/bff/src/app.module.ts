@@ -11,6 +11,7 @@ import { validateEnvironment } from './config/environment';
 import { ExpensesModule } from './expenses/expenses.module';
 import { HealthController } from './health.controller';
 import { AgentModule } from './agent/agent.module';
+import { KnowledgeModule } from './knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AgentModule } from './agent/agent.module';
     AuthModule,
     ExpensesModule,
     AgentModule,
+    KnowledgeModule,
   ],
   controllers: [HealthController],
   providers: [

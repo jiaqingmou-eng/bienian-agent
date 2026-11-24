@@ -234,6 +234,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/knowledge/documents': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Documents
+     * @description 分页读取当前身份可见的制度；调用方不能通过参数替换租户或责任人。
+     */
+    get: operations['documents_api_v1_knowledge_documents_get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/knowledge/documents/{document_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Document Detail
+     * @description 读取固定制度版本的原文和统一结构；不以知道 UUID 作为访问凭证。
+     */
+    get: operations['document_detail_api_v1_knowledge_documents__document_id__get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/knowledge/search': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Search
+     * @description 只读条款查询使用 POST 正文传问题，避免问题出现在 URL / 访问日志里。
+     */
+    post: operations['search_api_v1_knowledge_search_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -307,6 +367,130 @@ export interface components {
        * @enum {string}
        */
       account_key: 'employee_a' | 'employee_b' | 'finance';
+    };
+    /**
+     * DocumentBlock
+     * @description 结构块不是检索 chunk；行号始终映射到同一版本原件，采用一基闭区间。
+     */
+    DocumentBlock: {
+      /** Id */
+      id: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'heading' | 'paragraph' | 'list' | 'table' | 'code';
+      /** Text */
+      text: string;
+      /** Heading Path */
+      heading_path: string[];
+      /** Source Start Line */
+      source_start_line: number;
+      /** Source End Line */
+      source_end_line: number;
+    };
+    /**
+     * DocumentDetail
+     * @description 同时提供原文与章节结构，浏览器按纯文本展示，不能直接执行文档 HTML。
+     */
+    DocumentDetail: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Source Key */
+      source_key: string;
+      /** Title */
+      title: string;
+      /** Version */
+      version: number;
+      /** Owner Name */
+      owner_name: string;
+      /**
+       * Format
+       * @enum {string}
+       */
+      format: 'markdown' | 'text';
+      /**
+       * Effective From
+       * Format: date
+       */
+      effective_from: string;
+      /** Effective Until */
+      effective_until: string | null;
+      /**
+       * Visibility
+       * @enum {string}
+       */
+      visibility: 'tenant' | 'owner';
+      /**
+       * Status
+       * @default published
+       * @constant
+       */
+      status: 'published';
+      /** Original Text */
+      original_text: string;
+      /** Content Hash */
+      content_hash: string;
+      normalized_document: components['schemas']['NormalizedDocument'];
+    };
+    /**
+     * DocumentListResponse
+     * @description 只返回当前用户可读的已发布版本；原文页仍会独立检查权限。
+     */
+    DocumentListResponse: {
+      /** Items */
+      items: components['schemas']['DocumentSummary'][];
+      /** Total */
+      total: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+    };
+    /**
+     * DocumentSummary
+     * @description 员工可读的制度元数据，不公开内部租户标识和管理命令。
+     */
+    DocumentSummary: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Source Key */
+      source_key: string;
+      /** Title */
+      title: string;
+      /** Version */
+      version: number;
+      /** Owner Name */
+      owner_name: string;
+      /**
+       * Format
+       * @enum {string}
+       */
+      format: 'markdown' | 'text';
+      /**
+       * Effective From
+       * Format: date
+       */
+      effective_from: string;
+      /** Effective Until */
+      effective_until: string | null;
+      /**
+       * Visibility
+       * @enum {string}
+       */
+      visibility: 'tenant' | 'owner';
+      /**
+       * Status
+       * @default published
+       * @constant
+       */
+      status: 'published';
     };
     /** DraftPreview */
     DraftPreview: {
@@ -457,6 +641,20 @@ export interface components {
       service: 'backend';
     };
     /**
+     * NormalizedDocument
+     * @description 清洗规则版本随内容一起保存，后续规则升级不能悄悄改写旧版依据。
+     */
+    NormalizedDocument: {
+      /**
+       * Schema Version
+       * @default policy-text-v1
+       * @constant
+       */
+      schema_version: 'policy-text-v1';
+      /** Blocks */
+      blocks: components['schemas']['DocumentBlock'][];
+    };
+    /**
      * ReadyResponse
      * @description 数据库连通性检查成功时的响应结构。
      */
@@ -535,6 +733,63 @@ export interface components {
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * SearchDocumentsRequest
+     * @description 只接受问题、适用日期与条数；租户 / 权限 / 发布状态不由调用者指定。
+     */
+    SearchDocumentsRequest: {
+      /** Query */
+      query: string;
+      /** As Of */
+      as_of?: string | null;
+      /**
+       * Limit
+       * @default 5
+       */
+      limit: number;
+    };
+    /**
+     * SearchDocumentsResponse
+     * @description 候选条款最多返回 limit 条；空数组明确表示本次基线检索未命中，不等于制度无规定。
+     */
+    SearchDocumentsResponse: {
+      /** Query */
+      query: string;
+      /**
+       * As Of
+       * Format: date
+       */
+      as_of: string;
+      /** Limit */
+      limit: number;
+      /** Items */
+      items: components['schemas']['SearchHit'][];
+    };
+    /**
+     * SearchHit
+     * @description 返回完整条款作为证据；匹配子片段单独标识，不把残缺句子当作完整适用条件。
+     */
+    SearchHit: {
+      document: components['schemas']['DocumentSummary'];
+      /** Citation Id */
+      citation_id: string;
+      /** Matched Chunk Id */
+      matched_chunk_id: string;
+      /**
+       * Rule Version
+       * @default policy-chunks-v1
+       * @constant
+       */
+      rule_version: 'policy-chunks-v1';
+      /** Text */
+      text: string;
+      /** Heading Path */
+      heading_path: string[];
+      /** Source Start Line */
+      source_start_line: number;
+      /** Source End Line */
+      source_end_line: number;
     };
     /** StartRunRequest */
     StartRunRequest: {
@@ -1662,6 +1917,264 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['RunResponse'];
+        };
+      };
+      /** @description 请求格式错误 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 身份凭据缺失、无效或过期 */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 无权执行该操作 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 资源不存在或无权访问 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 幂等键与现有请求冲突 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 请求参数未通过校验 */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 数据库或依赖服务暂不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+    };
+  };
+  documents_api_v1_knowledge_documents_get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DocumentListResponse'];
+        };
+      };
+      /** @description 请求格式错误 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 身份凭据缺失、无效或过期 */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 无权执行该操作 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 资源不存在或无权访问 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 幂等键与现有请求冲突 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 请求参数未通过校验 */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 数据库或依赖服务暂不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+    };
+  };
+  document_detail_api_v1_knowledge_documents__document_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        document_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DocumentDetail'];
+        };
+      };
+      /** @description 请求格式错误 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 身份凭据缺失、无效或过期 */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 无权执行该操作 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 资源不存在或无权访问 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 幂等键与现有请求冲突 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 请求参数未通过校验 */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 数据库或依赖服务暂不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+    };
+  };
+  search_api_v1_knowledge_search_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SearchDocumentsRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SearchDocumentsResponse'];
         };
       };
       /** @description 请求格式错误 */
