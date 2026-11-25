@@ -234,6 +234,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/agent/chat': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Converse
+     * @description POST /api/v1/agent/chat：所有新 UI 自然语言消息先经过此入口。
+     *
+     *     接收稳定 message_id、message，以及可选的成对 run_id / expected_version；
+     *     租户和用户只来自鉴权依赖。制度咨询不写报销任务，报销分支复用原有服务和去重。
+     *     返回 kind 区分任务更新、政策回答和澄清提示；均为 HTTP 200，调用失败使用错误响应。
+     *     此接口不等同于确认授权；创建财务草稿仍必须走带确认凭据的 /runs/{id}/confirm。
+     */
+    post: operations['converse_api_v1_agent_chat_post'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/knowledge/documents': {
     parameters: {
       query?: never;
@@ -274,6 +299,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/knowledge/documents/{document_id}/citations/{citation_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Citation Detail
+     * @description 按文档UUID和引用ID读取固定版本的完整条款，供后续原文定位使用。
+     *
+     *     身份只来自鉴权依赖；不接受查询参数指定版本、行号、正文或租户。
+     *     每次访问重新检查当前权限与发布状态；历史已发布版本仍可读取，不自动替换新版。
+     *     返回可信版本、哈希、条款和原文范围；404表示不存在或不可访问，503表示索引异常。
+     *     此接口纯读取，不重新搜索、调用模型、清洗 / 切分、建立索引或写入审计 / 财务表。
+     */
+    get: operations['citation_detail_api_v1_knowledge_documents__document_id__citations__citation_id__get'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/knowledge/search': {
     parameters: {
       query?: never;
@@ -302,6 +352,77 @@ export interface components {
     CancelRunRequest: {
       /** Expected Version */
       expected_version: number;
+    };
+    /**
+     * ChatRequest
+     * @description 消息标识沿用报销去重语义；只有关联已有报销任务时才同时提交版本。
+     */
+    ChatRequest: {
+      /**
+       * Message Id
+       * Format: uuid
+       */
+      message_id: string;
+      /** Message */
+      message: string;
+      /** Run Id */
+      run_id?: string | null;
+      /** Expected Version */
+      expected_version?: number | null;
+    };
+    /**
+     * ChatResponse
+     * @description 统一外壳：expense 才携带任务；政策回答只携带本次核验过的来源。
+     */
+    ChatResponse: {
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'expense' | 'policy' | 'clarification';
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'expense'
+        | 'answered'
+        | 'insufficient'
+        | 'conflict'
+        | 'needs_clarification'
+        | 'unsupported';
+      /** Message */
+      message: string;
+      /** As Of */
+      as_of?: string | null;
+      /** Sources */
+      sources?: components['schemas']['SearchHit'][];
+      run?: components['schemas']['RunResponse'] | null;
+    };
+    /**
+     * CitationDetail
+     * @description 固定版本的完整引用证据；哈希供后续原文页核对，子片段和内部身份不向外暴露。
+     */
+    CitationDetail: {
+      document: components['schemas']['DocumentSummary'];
+      /** Content Hash */
+      content_hash: string;
+      /** Citation Id */
+      citation_id: string;
+      /**
+       * Rule Version
+       * @default policy-chunks-v1
+       * @constant
+       */
+      rule_version: 'policy-chunks-v1';
+      /** Text */
+      text: string;
+      /** Heading Path */
+      heading_path: string[];
+      /** Source Start Line */
+      source_start_line: number;
+      /** Source End Line */
+      source_end_line: number;
     };
     /** ConfirmRunRequest */
     ConfirmRunRequest: {
@@ -1984,6 +2105,93 @@ export interface operations {
       };
     };
   };
+  converse_api_v1_agent_chat_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ChatRequest'];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ChatResponse'];
+        };
+      };
+      /** @description 请求格式错误 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 身份凭据缺失、无效或过期 */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 无权执行该操作 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 资源不存在或无权访问 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 幂等键与现有请求冲突 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 请求参数未通过校验 */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 数据库或依赖服务暂不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+    };
+  };
   documents_api_v1_knowledge_documents_get: {
     parameters: {
       query?: {
@@ -2088,6 +2296,92 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['DocumentDetail'];
+        };
+      };
+      /** @description 请求格式错误 */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 身份凭据缺失、无效或过期 */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 无权执行该操作 */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 资源不存在或无权访问 */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 幂等键与现有请求冲突 */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 请求参数未通过校验 */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+      /** @description 数据库或依赖服务暂不可用 */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ErrorResponse'];
+        };
+      };
+    };
+  };
+  citation_detail_api_v1_knowledge_documents__document_id__citations__citation_id__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        document_id: string;
+        citation_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CitationDetail'];
         };
       };
       /** @description 请求格式错误 */

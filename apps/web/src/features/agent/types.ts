@@ -1,4 +1,22 @@
 import type { CreateExpense } from '../../api/types';
+import type { SearchDocuments } from '../knowledge/types';
+
+/** 与 BFF 保持独立的对话协议；咨询结果不被误当成报销任务快照。 */
+export interface ChatReply {
+  kind: 'expense' | 'policy' | 'clarification';
+  status:
+    'expense' | 'answered' | 'insufficient' | 'conflict' | 'needs_clarification' | 'unsupported';
+  message: string;
+  as_of: string | null;
+  sources: SearchDocuments['items'];
+  run: AgentRun | null;
+}
+
+export interface Consultation {
+  id: string;
+  question: string;
+  reply: ChatReply;
+}
 
 export interface AgentRunSummary {
   id: string;

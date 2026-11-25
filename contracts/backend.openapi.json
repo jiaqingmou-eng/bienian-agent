@@ -1441,6 +1441,113 @@
         }
       }
     },
+    "/api/v1/agent/chat": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "Converse",
+        "description": "POST /api/v1/agent/chat：所有新 UI 自然语言消息先经过此入口。\n\n接收稳定 message_id、message，以及可选的成对 run_id / expected_version；\n租户和用户只来自鉴权依赖。制度咨询不写报销任务，报销分支复用原有服务和去重。\n返回 kind 区分任务更新、政策回答和澄清提示；均为 HTTP 200，调用失败使用错误响应。\n此接口不等同于确认授权；创建财务草稿仍必须走带确认凭据的 /runs/{id}/confirm。",
+        "operationId": "converse_api_v1_agent_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份凭据缺失、无效或过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权执行该操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键与现有请求冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数未通过校验",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "数据库或依赖服务暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/knowledge/documents": {
       "get": {
         "tags": [
@@ -1673,6 +1780,125 @@
         }
       }
     },
+    "/api/v1/knowledge/documents/{document_id}/citations/{citation_id}": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Citation Detail",
+        "description": "按文档UUID和引用ID读取固定版本的完整条款，供后续原文定位使用。\n\n身份只来自鉴权依赖；不接受查询参数指定版本、行号、正文或租户。\n每次访问重新检查当前权限与发布状态；历史已发布版本仍可读取，不自动替换新版。\n返回可信版本、哈希、条款和原文范围；404表示不存在或不可访问，503表示索引异常。\n此接口纯读取，不重新搜索、调用模型、清洗 / 切分、建立索引或写入审计 / 财务表。",
+        "operationId": "citation_detail_api_v1_knowledge_documents__document_id__citations__citation_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "citation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "title": "Citation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitationDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "请求格式错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "身份凭据缺失、无效或过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "无权执行该操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "资源不存在或无权访问",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "幂等键与现有请求冲突",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求参数未通过校验",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "数据库或依赖服务暂不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/knowledge/search": {
       "post": {
         "tags": [
@@ -1797,6 +2023,181 @@
           "expected_version"
         ],
         "title": "CancelRunRequest"
+      },
+      "ChatRequest": {
+        "properties": {
+          "message_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Message Id"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "message_id",
+          "message"
+        ],
+        "title": "ChatRequest",
+        "description": "消息标识沿用报销去重语义；只有关联已有报销任务时才同时提交版本。"
+      },
+      "ChatResponse": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "expense",
+              "policy",
+              "clarification"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "expense",
+              "answered",
+              "insufficient",
+              "conflict",
+              "needs_clarification",
+              "unsupported"
+            ],
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Sources"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "status",
+          "message"
+        ],
+        "title": "ChatResponse",
+        "description": "统一外壳：expense 才携带任务；政策回答只携带本次核验过的来源。"
+      },
+      "CitationDetail": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/DocumentSummary"
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Content Hash"
+          },
+          "citation_id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Citation Id"
+          },
+          "rule_version": {
+            "type": "string",
+            "const": "policy-chunks-v1",
+            "title": "Rule Version",
+            "default": "policy-chunks-v1"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 131072,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "heading_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Heading Path"
+          },
+          "source_start_line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source Start Line"
+          },
+          "source_end_line": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Source End Line"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document",
+          "content_hash",
+          "citation_id",
+          "text",
+          "heading_path",
+          "source_start_line",
+          "source_end_line"
+        ],
+        "title": "CitationDetail",
+        "description": "固定版本的完整引用证据；哈希供后续原文页核对，子片段和内部身份不向外暴露。"
       },
       "ConfirmRunRequest": {
         "properties": {

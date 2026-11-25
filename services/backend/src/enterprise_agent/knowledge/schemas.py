@@ -116,3 +116,32 @@ class SearchDocumentsResponse(BaseModel):
     as_of: date
     limit: int
     items: list[SearchHit]
+
+
+class CitationQuery(BaseModel):
+    """引用由路径唯一确定；拒绝通过查询参数指定身份、版本、行号或其他引用内容。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CitationDetail(BaseModel):
+    """固定版本的完整引用证据；哈希供后续原文页核对，子片段和内部身份不向外暴露。"""
+
+    document: DocumentSummary
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    citation_id: str = Field(pattern=r"^[a-f0-9]{64}$")
+    rule_version: Literal["policy-chunks-v1"] = "policy-chunks-v1"
+    text: str = Field(min_length=1, max_length=131072)
+    heading_path: list[str]
+    source_start_line: int = Field(strict=True, ge=1)
+    source_end_line: int = Field(strict=True, ge=1)
+
+    @model_validator(mode="after")
+    def ordered_lines(self):
+        """原文范围采用一基闭区间，不能发布倒置或与条款行数不符的映射。"""
+        if (
+            self.source_end_line < self.source_start_line
+            or self.text.count("\n") + 1 != self.source_end_line - self.source_start_line + 1
+        ):
+            raise ValueError("引用原文范围与正文不一致")
+        return self

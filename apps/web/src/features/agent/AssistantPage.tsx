@@ -18,7 +18,8 @@ import { api, describeError } from '../../api/client';
 import { useAuth } from '../../app/auth';
 import { formatMoney } from '../../lib/money';
 import { recoverTaskParams, taskStorageKey } from './taskNavigation';
-import type { AgentRun, AgentRunList } from './types';
+import type { AgentRun, AgentRunList, ChatReply, Consultation } from './types';
+import { ConsultationReplies } from './ConsultationReplies';
 
 const statusLabels: Record<AgentRun['status'], string> = {
   collecting: '待补充信息',
@@ -52,6 +53,8 @@ export function AssistantPage() {
   const [page, setPage] = useState(1);
   const [revision, setRevision] = useState(0);
   const [taskBusy, setTaskBusy] = useState(false);
+  // 咨询生命周期属于本次页面，和报销任务分开；切换任务不会把咨询写入另一任务。
+  const [consultations, setConsultations] = useState<Consultation[]>([]);
   const storageKey = taskStorageKey(user?.tenant_id ?? '', user?.id ?? '');
 
   useEffect(() => {
@@ -103,6 +106,7 @@ export function AssistantPage() {
   }, [runId, isNew, history, params, setParams, storageKey]);
 
   function newTask() {
+    setConsultations([]);
     setParams({ new: '1' });
   }
 
@@ -160,11 +164,13 @@ export function AssistantPage() {
           />
         )}
       </Card>
+      <ConsultationReplies items={consultations} />
       {runId || isNew ? (
         <AssistantTask
           key={runId ?? 'new'}
           runId={runId}
           onBusyChange={setTaskBusy}
+          onConsultation={(item) => setConsultations((previous) => [...previous, item].slice(-10))}
           onNew={newTask}
           onAccepted={(next) => {
             setRevision((value) => value + 1);
@@ -186,9 +192,16 @@ interface AssistantTaskProps {
   onAccepted: (run: AgentRun) => void;
   onNew: () => void;
   onBusyChange: (busy: boolean) => void;
+  onConsultation: (item: Consultation) => void;
 }
 
-function AssistantTask({ runId, onAccepted, onNew, onBusyChange }: AssistantTaskProps) {
+function AssistantTask({
+  runId,
+  onAccepted,
+  onNew,
+  onBusyChange,
+  onConsultation,
+}: AssistantTaskProps) {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
@@ -271,17 +284,22 @@ function AssistantTask({ runId, onAccepted, onNew, onBusyChange }: AssistantTask
         : { text, id: crypto.randomUUID(), runId: run?.id, version: run?.version ?? 0 };
     pending.current = operation;
     try {
-      const path = run ? `/agent/runs/${run.id}/messages` : '/agent/runs';
-      const body = run
-        ? { message_id: operation.id, expected_version: operation.version, message: text }
-        : { client_request_id: operation.id, message: text };
-      accept(
-        await api<AgentRun>(path, {
-          method: 'POST',
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(50_000),
-        }),
-      );
+      // 自然语言先进入编排接口；只有 expense 响应才能更新任务快照和右侧预览。
+      const body = {
+        message_id: operation.id,
+        message: text,
+        ...(operation.runId
+          ? { run_id: operation.runId, expected_version: operation.version }
+          : {}),
+      };
+      const reply = await api<ChatReply>('/agent/chat', {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(130_000),
+      });
+      if (!mounted.current) return;
+      if (reply.kind === 'expense' && reply.run) accept(reply.run);
+      else onConsultation({ id: operation.id, question: text, reply });
       setInput('');
       pending.current = null;
     } catch (err) {
@@ -347,7 +365,7 @@ function AssistantTask({ runId, onAccepted, onNew, onBusyChange }: AssistantTask
           <span className="eyebrow">EXPENSE ASSISTANT</span>
           <Typography.Title level={2}>报销助手</Typography.Title>
           <Typography.Text type="secondary">
-            描述费用，我会帮你补齐信息并整理草稿，核对后再创建。
+            可以描述费用整理草稿，也可以咨询报销制度；咨询时请明确地点和适用条件。
           </Typography.Text>
         </div>
         <Space wrap>
@@ -384,7 +402,7 @@ function AssistantTask({ runId, onAccepted, onNew, onBusyChange }: AssistantTask
         <Tag color={run.status === 'completed' ? 'green' : 'blue'}>{statusLabels[run.status]}</Tag>
       )}
       <div className="assistant-grid">
-        <Card title="费用对话" className="assistant-conversation" aria-busy={busy}>
+        <Card title="对话" className="assistant-conversation" aria-busy={busy}>
           {!run && (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -426,9 +444,9 @@ function AssistantTask({ runId, onAccepted, onNew, onBusyChange }: AssistantTask
             rows={4}
             maxLength={2000}
             showCount
-            disabled={!editable || busy || (!!runId && !run)}
+            disabled={busy || (!!runId && !run)}
             aria-label="描述报销费用"
-            placeholder="补充用途、日期、费用类别和金额，或说明需要修改的内容。"
+            placeholder="描述报销费用，或问：成都出差的住宿标准是多少？"
             ref={(element) => {
               inputRef.current = element?.resizableTextArea?.textArea ?? null;
             }}
@@ -441,7 +459,7 @@ function AssistantTask({ runId, onAccepted, onNew, onBusyChange }: AssistantTask
               type="primary"
               icon={<SendOutlined />}
               loading={busy}
-              disabled={!editable || !input.trim() || (!!runId && !run)}
+              disabled={!input.trim() || (!!runId && !run)}
               onClick={() => {
                 void send();
               }}

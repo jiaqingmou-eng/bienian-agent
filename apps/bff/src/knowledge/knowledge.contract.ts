@@ -5,6 +5,7 @@ import type { components } from '../backend/backend.schema';
 export type DocumentDetail = components['schemas']['DocumentDetail'];
 export type DocumentList = components['schemas']['DocumentListResponse'];
 export type SearchDocuments = components['schemas']['SearchDocumentsResponse'];
+export type CitationDetail = components['schemas']['CitationDetail'];
 type Summary = components['schemas']['DocumentSummary'];
 const record = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -172,4 +173,45 @@ export function parseSearchDocuments(value: unknown): SearchDocuments {
     });
   }
   return { query: value.query, as_of: value.as_of, limit: value.limit, items };
+}
+
+/** 引用详情不按今天的日期筛掉历史版本；验证目标、版本元数据及一基闭区间后显式裁剪。
+ * content_hash用于后续原文页比对同一份内容，不接受以模型输出或客户端行号替代它。
+ */
+export function parseCitationDetail(
+  value: unknown,
+  documentId: string,
+  citationId: string,
+): CitationDetail {
+  if (
+    !record(value) ||
+    !summary(value.document) ||
+    value.document.id.toLowerCase() !== documentId.toLowerCase() ||
+    typeof value.content_hash !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(value.content_hash) ||
+    typeof value.citation_id !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(value.citation_id) ||
+    value.citation_id !== citationId ||
+    value.rule_version !== 'policy-chunks-v1' ||
+    !text(value.text, 131072) ||
+    !Array.isArray(value.heading_path) ||
+    !value.heading_path.every((item: unknown) => text(item, 131072)) ||
+    !integer(value.source_start_line) ||
+    value.source_start_line < 1 ||
+    !integer(value.source_end_line) ||
+    value.source_end_line < value.source_start_line ||
+    value.text.split('\n').length !== value.source_end_line - value.source_start_line + 1
+  ) {
+    throw new HttpException('制度服务返回了无效引用详情', 502);
+  }
+  return {
+    document: publicSummary(value.document),
+    content_hash: value.content_hash,
+    citation_id: value.citation_id,
+    rule_version: value.rule_version,
+    text: value.text,
+    heading_path: value.heading_path as string[],
+    source_start_line: value.source_start_line,
+    source_end_line: value.source_end_line,
+  };
 }

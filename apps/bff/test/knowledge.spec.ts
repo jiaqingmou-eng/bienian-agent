@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { INestApplication } from '@nestjs/common';
+import { HttpException, INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -39,6 +39,18 @@ const document = {
       },
     ],
   },
+};
+
+/** 旧版已过适用期仍可核对原文，引用读取不能沿用检索时的当天日期过滤。 */
+const citation = {
+  document: { ...document, effective_until: '2026-06-30' },
+  content_hash: document.content_hash,
+  citation_id: 'd'.repeat(64),
+  rule_version: 'policy-chunks-v1',
+  text: '第一条 成都住宿不超过400.00元。\n超标部分不能自动报销。',
+  heading_path: ['虚构制度'],
+  source_start_line: 3,
+  source_end_line: 4,
 };
 
 describe('制度只读 BFF 边界', () => {
@@ -197,5 +209,73 @@ describe('制度只读 BFF 边界', () => {
     await session.get(`/api/knowledge/documents/${document.id}`).expect(502);
     backend.request.mockResolvedValue({ items: [document], total: 0, limit: 20, offset: 0 });
     await session.get('/api/knowledge/documents').expect(502);
+  });
+
+  it('引用读取需要登录，只转发固定路径及可信身份并裁剪内部字段', async () => {
+    const path = `/api/knowledge/documents/${document.id}/citations/${citation.citation_id}`;
+    await request(app.getHttpServer()).get(path).expect(401);
+    expect(backend.request).not.toHaveBeenCalled();
+    const session = await login();
+    backend.request.mockResolvedValue({
+      ...citation,
+      document: { ...citation.document, tenant_id: 'must-not-leak' },
+      internal: 'must-not-leak',
+    });
+    const result = await session.get(path).expect(200);
+    expect(result.body.text).toEqual(citation.text);
+    expect(result.body.document.effective_until).toBe('2026-06-30');
+    expect(result.body.document.tenant_id).toBeUndefined();
+    expect(result.body.document.original_text).toBeUndefined();
+    expect(result.body.internal).toBeUndefined();
+    expect(backend.request).toHaveBeenCalledWith(
+      `/api/v1/knowledge/documents/${document.id}/citations/${citation.citation_id}`,
+      expect.objectContaining({ userId: user.id, requestId: expect.any(String) }),
+    );
+    expect(backend.request).toHaveBeenCalledTimes(1);
+  });
+
+  it('引用路径和查询参数在转发前校验，不接受客户端指定身份 / 行号 / 版本', async () => {
+    const session = await login();
+    const path = `/api/knowledge/documents/${document.id}/citations/${citation.citation_id}`;
+    for (const target of [
+      `/api/knowledge/documents/not-a-uuid/citations/${citation.citation_id}`,
+      `/api/knowledge/documents/${document.id}/citations/invalid`,
+      `${path}?tenant_id=forged`,
+      `${path}?source_start_line=1`,
+      `${path}?version=2`,
+    ]) {
+      await session.get(target).expect(400);
+    }
+    expect(backend.request).not.toHaveBeenCalled();
+  });
+
+  it('引用详情拒绝目标错位、错误哈希、无效范围或损坏正文', async () => {
+    const session = await login();
+    const path = `/api/knowledge/documents/${document.id}/citations/${citation.citation_id}`;
+    for (const changed of [
+      { document: { ...citation.document, id: randomUUID() } },
+      { document: { ...citation.document, status: 'draft' } },
+      { citation_id: 'e'.repeat(64) },
+      { content_hash: 'invalid' },
+      { rule_version: 'unknown-rule' },
+      { source_start_line: 0 },
+      { source_end_line: 2 },
+      { source_end_line: 5 },
+      { text: undefined },
+    ]) {
+      backend.request.mockResolvedValue({ ...citation, ...changed });
+      await session.get(path).expect(502);
+    }
+  });
+
+  it('不可访问和索引异常保留后端错误语义，不重试或换来源', async () => {
+    const session = await login();
+    const path = `/api/knowledge/documents/${document.id}/citations/${citation.citation_id}`;
+    for (const status of [404, 503]) {
+      backend.request.mockClear();
+      backend.request.mockRejectedValue(new HttpException('引用读取失败', status));
+      await session.get(path).expect(status);
+      expect(backend.request).toHaveBeenCalledTimes(1);
+    }
   });
 });

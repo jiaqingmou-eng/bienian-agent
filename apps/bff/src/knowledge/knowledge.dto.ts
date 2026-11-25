@@ -9,6 +9,7 @@ import {
   Min,
   MinLength,
   IsDateString,
+  IsUUID,
 } from 'class-validator';
 
 /** 只接受分页参数；全局 ValidationPipe 会拒绝伪造的租户、责任人或状态字段。 */
@@ -44,4 +45,14 @@ export class SearchDocumentsDto {
   @Min(1)
   @Max(10)
   limit = 5;
+}
+
+/** 引用路径只允许固定文档UUID和完整条款ID，不接受任意文本、行号或子片段ID。 */
+export class CitationParamsDto {
+  @IsUUID()
+  id!: string;
+
+  @IsString()
+  @Matches(/^[a-f0-9]{64}$/)
+  citation_id!: string;
 }
